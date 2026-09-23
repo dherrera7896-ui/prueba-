@@ -1,0 +1,36 @@
+name: Actualizar convocatorias
+
+on:
+  schedule:
+    # Corre todos los días a las 10:00 UTC (~05:00 hora Perú)
+    - cron: "0 10 * * *"
+  workflow_dispatch: {}   # te deja correrlo manualmente desde la pestaña Actions
+
+permissions:
+  contents: write
+
+jobs:
+  actualizar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clonar el repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar dependencias
+        run: pip install requests
+
+      - name: Obtener datos del OSCE
+        run: python scripts/obtener_datos.py
+
+      - name: Subir los datos si cambiaron
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/data/procedimientos.json
+          git diff --cached --quiet || git commit -m "Actualización automática de convocatorias $(date -u +'%Y-%m-%d')"
+          git push

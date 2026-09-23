@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Convocatorias del Estado</title>
+<style>
+  :root{
+    --navy:#1F3A5F; --gold:#B8863B; --bg:#F7F5F0; --panel:#FFFFFF;
+    --border:#DCD6C9; --text:#242322; --dim:#5B6470;
+  }
+  *{ box-sizing:border-box; }
+  body{ margin:0; background:var(--bg); color:var(--text); font-family:Arial, sans-serif; }
+  header{ background:var(--navy); color:#fff; padding:24px 20px; }
+  header h1{ margin:0 0 4px; font-size:1.5rem; }
+  header p{ margin:0; color:#C9D2DF; font-size:0.9rem; }
+  .wrap{ max-width:1000px; margin:0 auto; padding:20px; }
+  .controles{ display:flex; gap:10px; flex-wrap:wrap; margin-bottom:16px; }
+  .controles input, .controles select{
+    padding:10px; border:1px solid var(--border); font-size:0.9rem; background:#fff;
+  }
+  #buscador{ flex:1; min-width:220px; }
+  .meta{ font-size:0.85rem; color:var(--dim); margin-bottom:14px; }
+  .item{
+    background:var(--panel); border:1px solid var(--border); border-radius:6px;
+    padding:14px 16px; margin-bottom:10px;
+  }
+  .item h3{ margin:0 0 6px; font-size:1rem; color:var(--navy); }
+  .item .entidad{ font-size:0.85rem; color:var(--gold); font-weight:bold; margin-bottom:4px; }
+  .item .detalle{ font-size:0.85rem; color:var(--dim); }
+  .vacio{ text-align:center; color:var(--dim); padding:40px 0; }
+  #paginacion{ display:flex; justify-content:center; gap:8px; margin-top:16px; }
+  #paginacion button{
+    padding:8px 14px; border:1px solid var(--border); background:#fff; cursor:pointer;
+  }
+  #paginacion button:disabled{ opacity:0.4; cursor:default; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>📋 Convocatorias del Estado</h1>
+  <p>Procedimientos de selección publicados por el OSCE (datos abiertos, estándar OCDS)</p>
+</header>
+
+<div class="wrap">
+  <div class="controles">
+    <input type="text" id="buscador" placeholder="Buscar por palabra clave, entidad, objeto...">
+    <select id="filtroEntidad"><option value="">Todas las entidades</option></select>
+  </div>
+  <div class="meta" id="meta">Cargando datos...</div>
+  <div id="lista"></div>
+  <div id="paginacion"></div>
+</div>
+
+<script>
+  const RUTA_DATOS = 'data/procedimientos.json';
+  const POR_PAGINA = 20;
+
+  let todos = [];
+  let filtrados = [];
+  let paginaActual = 1;
+
+  async function cargar(){
+    try{
+      const res = await fetch(RUTA_DATOS);
+      if(!res.ok) throw new Error('No se pudo leer el archivo de datos');
+      const datos = await res.json();
+      todos = datos.procedimientos || [];
+      filtrados = todos;
+
+      document.getElementById('meta').textContent =
+        `${todos.length} procedimiento(s) · actualizado: ${new Date(datos.actualizado_el).toLocaleString('es-PE')}`;
+
+      llenarFiltroEntidades();
+      render();
+    }catch(err){
+      document.getElementById('meta').textContent = '';
+      document.getElementById('lista').innerHTML =
+        `<div class="vacio">Todavía no hay datos cargados (o el script de descarga aún no corrió). Error: ${err.message}</div>`;
+    }
+  }
+
+  function extraerCampo(proc, ...rutas){
+    for(const ruta of rutas){
+      const valor = ruta.split('.').reduce((o, k) => (o && o[k] !== undefined) ? o[k] : undefined, proc);
+      if(valor) return valor;
+    }
+    return '';
+  }
+
+  function llenarFiltroEntidades(){
+    const entidades = new Set();
+    todos.forEach(p => {
+      const nombre = extraerCampo(p, 'buyer.name', 'parties.0.name');
+      if(nombre) entidades.add(nombre);
+    });
+    const sel = document.getElementById('filtroEntidad');
+    [...entidades].sort().forEach(e => {
+      const op = document.createElement('option');
+      op.value = e; op.textContent = e;
+      sel.appendChild(op);
+    });
+  }
+
+  function aplicarFiltros(){
+    const texto = document.getElementById('buscador').value.toLowerCase();
+    const entidad = document.getElementById('filtroEntidad').value;
+
+    filtrados = todos.filter(p => {
+      const titulo = extraerCampo(p, 'tender.title', 'title');
+      const nombreEntidad = extraerCampo(p, 'buyer.name', 'parties.0.name');
+      const descripcion = extraerCampo(p, 'tender.description');
+
+      const coincideTexto = !texto ||
+        (titulo + ' ' + descripcion + ' ' + nombreEntidad).toLowerCase().includes(texto);
+      const coincideEntidad = !entidad || nombreEntidad === entidad;
+
+      return coincideTexto && coincideEntidad;
+    });
+    paginaActual = 1;
+    render();
+  }
+
+  function render(){
+    const lista = document.getElementById('lista');
+    const inicio = (paginaActual - 1) * POR_PAGINA;
+    const pagina = filtrados.slice(inicio, inicio + POR_PAGINA);
+
+    if(pagina.length === 0){
+      lista.innerHTML = '<div class="vacio">No se encontraron procedimientos con ese filtro.</div>';
+    }else{
+      lista.innerHTML = pagina.map(p => {
+        const titulo = extraerCampo(p, 'tender.title', 'title') || '(sin título)';
+        const entidad = extraerCampo(p, 'buyer.name', 'parties.0.name') || 'Entidad no especificada';
+        const fecha = extraerCampo(p, 'tender.tenderPeriod.startDate', 'date');
+        const monto = extraerCampo(p, 'tender.value.amount');
+        const moneda = extraerCampo(p, 'tender.value.currency');
+
+        return `<div class="item">
+          <div class="entidad">${entidad}</div>
+          <h3>${titulo}</h3>
+          <div class="detalle">
+            ${fecha ? new Date(fecha).toLocaleDateString('es-PE') : ''}
+            ${monto ? ' · ' + Number(monto).toLocaleString('es-PE') + ' ' + moneda : ''}
+          </div>
+        </div>`;
+      }).join('');
+    }
+
+    renderPaginacion();
+  }
+
+  function renderPaginacion(){
+    const totalPaginas = Math.ceil(filtrados.length / POR_PAGINA);
+    const cont = document.getElementById('paginacion');
+    if(totalPaginas <= 1){ cont.innerHTML = ''; return; }
+
+    cont.innerHTML = `
+      <button ${paginaActual===1?'disabled':''} onclick="cambiarPagina(${paginaActual-1})">← Anterior</button>
+      <span style="align-self:center;font-size:0.85rem;color:#5B6470;">Página ${paginaActual} de ${totalPaginas}</span>
+      <button ${paginaActual===totalPaginas?'disabled':''} onclick="cambiarPagina(${paginaActual+1})">Siguiente →</button>
+    `;
+  }
+
+  function cambiarPagina(n){
+    paginaActual = n;
+    render();
+    window.scrollTo({top:0, behavior:'smooth'});
+  }
+
+  document.getElementById('buscador').addEventListener('input', aplicarFiltros);
+  document.getElementById('filtroEntidad').addEventListener('change', aplicarFiltros);
+
+  cargar();
+</script>
+</body>
+</html>
